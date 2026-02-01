@@ -45,6 +45,7 @@ export async function POST(req: Request) {
   if (!user) {
     return new Response("Unauthorized", { status: 401 });
   }
+  const userId = user.id;
 
   let body: {
     messages?: UIMessage[];
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
     .from("sessions")
     .select("id, user_id, life_story_mode")
     .eq("id", sessionId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .single();
 
   if (!session) {
@@ -85,9 +86,9 @@ export async function POST(req: Request) {
 
   // Missing suggestions for system prompt
   const [profileRes, workRes, projectsRes] = await Promise.all([
-    supabase.from("profiles").select("bio, current_job_role, career_summary, skills").eq("user_id", user.id).single(),
-    supabase.from("work_experience").select("id").eq("user_id", user.id),
-    supabase.from("projects").select("id").eq("user_id", user.id),
+    supabase.from("profiles").select("bio, current_job_role, career_summary, skills").eq("user_id", userId).single(),
+    supabase.from("work_experience").select("id").eq("user_id", userId),
+    supabase.from("projects").select("id").eq("user_id", userId),
   ]);
   const missingSuggestions: string[] = [];
   const p = profileRes.data;
@@ -131,7 +132,7 @@ export async function POST(req: Request) {
     const extracted = extractAllResumeJsonFromText(text ?? "");
     for (const item of extracted) {
       try {
-        await upsertExtracted(supabase, user.id, item);
+        await upsertExtracted(supabase, userId, item);
       } catch (e) {
         console.error("Upsert extracted error:", e);
       }
