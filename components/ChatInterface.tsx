@@ -6,9 +6,17 @@ import { DefaultChatTransport } from "ai";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Send, Square, BookHeart } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { Loader2, Send, Square, BookHeart, MessageSquarePlus, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface SessionItem {
+  id: string;
+  start_time: string;
+  end_time: string | null;
+  summary: string | null;
+  status: "active" | "ended";
+  life_story_mode: boolean;
+}
 
 interface ChatInterfaceProps {
   userId: string;
@@ -18,9 +26,15 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ userId, onChatFinish }: ChatInterfaceProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
   const [lifeStoryMode, setLifeStoryMode] = useState(false);
   const [endSummary, setEndSummary] = useState<string | null>(null);
+  const [endChatLoading, setEndChatLoading] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const lifeStoryRef = useRef(lifeStoryMode);
   lifeStoryRef.current = lifeStoryMode;
 
@@ -85,27 +99,47 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
     };
   }, []);
 
-  // Clear end summary when we get a new session
+  // Fetch sessions list (for sidebar); refetch when session changes (e.g. after end chat)
   useEffect(() => {
-    if (sessionId && endSummary) setEndSummary(null);
+    let cancelled = false;
+    setSessionsLoading(true);
+    (async () => {
+      const res = await fetch("/api/sessions");
+      if (cancelled) return;
+      setSessionsLoading(false);
+      if (!res.ok) return;
+      const data = await res.json();
+      setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId]);
 
-  // Load messages when we have a session
+  // Load chat history when we have a session
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
+    setMessages([]);
+    setHistoryLoading(true);
     (async () => {
       const res = await fetch(`/api/messages?sessionId=${encodeURIComponent(sessionId)}`);
-      if (!res.ok || cancelled) return;
+      if (cancelled) return;
+      setHistoryLoading(false);
+      if (!res.ok) return;
       const data = await res.json();
-      if (Array.isArray(data.messages) && data.messages.length > 0) {
-        setMessages(data.messages);
-      }
+      const list = Array.isArray(data.messages) ? data.messages : [];
+      setMessages(list);
     })();
     return () => {
       cancelled = true;
     };
   }, [sessionId, setMessages]);
+
+  // Scroll to bottom when messages change so latest is visible
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // Notify parent when AI stream finishes so live notes can refetch
   const prevStatusRef = useRef(status);
@@ -124,6 +158,7 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
       e.preventDefault();
       const text = input.trim();
       if (!text || status !== "ready") return;
+      setEndSummary(null); // clear session summary when user starts typing again
       sendMessage({ text });
       setInput("");
     },
@@ -132,28 +167,147 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
 
   const handleEndChat = useCallback(async () => {
     if (!sessionId) return;
-    const res = await fetch("/api/session/end", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setEndSummary(data.summary ?? "Session ended.");
-      setSessionId(null);
-      setMessages([]);
-      const next = await fetch("/api/session");
-      if (next.ok) {
-        const d = await next.json();
-        setSessionId(d.sessionId);
+    setEndChatLoading(true);
+    try {
+      const res = await fetch("/api/session/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEndSummary(data.summary ?? "Session ended.");
+        setMessages([]);
+        const next = await fetch("/api/session");
+        if (next.ok) {
+          const d = await next.json();
+          setSessionId(d.sessionId);
+        }
       }
+    } finally {
+      setEndChatLoading(false);
     }
   }, [sessionId, setMessages]);
 
+  const handleSelectSession = useCallback(async (s: SessionItem) => {
+    if (s.id === sessionId) {
+      setSessionsOpen(false);
+      return;
+    }
+    if (s.status === "ended") {
+      const res = await fetch("/api/session/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: s.id }),
+      });
+      if (!res.ok) return;
+    }
+    setSessionId(s.id);
+    setEndSummary(null);
+    setSessionsOpen(false);
+  }, [sessionId]);
+
+  const handleNewChat = useCallback(async () => {
+    const res = await fetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.sessionId) {
+      setSessionId(data.sessionId);
+      setMessages([]);
+      setEndSummary(null);
+      setSessionsOpen(false);
+    }
+  }, [setMessages]);
+
   const isLoading = status === "streaming" || status === "submitted";
+  const endChatDisabled = !sessionId || isLoading || endChatLoading;
+
+  function sessionLabel(s: SessionItem): string {
+    const date = s.start_time ? new Date(s.start_time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+    if (s.summary?.trim()) {
+      const line = s.summary.trim().split(/\n/)[0] ?? "";
+      const first = line.slice(0, 40) + (line.length > 40 ? "…" : "");
+      return first || date;
+    }
+    return date || "Chat";
+  }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-w-0">
+      {/* Toggle sessions panel */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => setSessionsOpen((v) => !v)}
+        className="shrink-0 rounded-r-none border-r border-border h-9 px-2"
+        title={sessionsOpen ? "Hide sessions" : "Show sessions"}
+      >
+        {sessionsOpen ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronRight className="h-4 w-4" />
+        )}
+      </Button>
+
+      {/* Sessions sidebar */}
+      <div
+        className={cn(
+          "flex flex-col border-r bg-muted/30 shrink-0 transition-[width] overflow-hidden",
+          sessionsOpen ? "w-56" : "w-0"
+        )}
+      >
+        <div className="p-2 flex flex-col gap-1 shrink-0">
+          <span className="text-sm font-medium text-foreground px-2">Sessions</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleNewChat}
+            className="text-xs justify-start"
+          >
+            <MessageSquarePlus className="h-4 w-4 mr-1 shrink-0" />
+            New chat
+          </Button>
+        </div>
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="p-2 space-y-0.5">
+            {sessionsLoading && (
+              <p className="text-muted-foreground text-xs px-2 py-2 flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+              </p>
+            )}
+            {!sessionsLoading && sessions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => handleSelectSession(s)}
+                className={cn(
+                  "w-full text-left rounded-md px-2 py-2 text-xs transition-colors",
+                  s.id === sessionId
+                    ? "bg-primary/15 text-primary font-medium"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <span className="block truncate">{sessionLabel(s)}</span>
+                <span className={cn(
+                  "text-[10px] mt-0.5 block",
+                  s.status === "active" ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+                )}>
+                  {s.status === "active" ? "Active" : "Ended"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+
+      {/* Main chat */}
+      <div className="flex flex-col flex-1 min-w-0">
       {apiKeyError && (
         <div className="mx-4 mt-2 p-3 rounded-lg bg-destructive/15 text-destructive text-sm border border-destructive/30">
           <strong>Anthropic API:</strong> {apiKeyError}
@@ -180,10 +334,14 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
           variant="outline"
           size="sm"
           onClick={handleEndChat}
-          disabled={!sessionId || isLoading}
+          disabled={endChatDisabled}
         >
-          <Square className="h-4 w-4 mr-1" />
-          End chat
+          {endChatLoading ? (
+            <Loader2 className="h-4 w-4 mr-1 animate-spin shrink-0" />
+          ) : (
+            <Square className="h-4 w-4 mr-1" />
+          )}
+          {endChatLoading ? "Ending…" : "End chat"}
         </Button>
       </div>
 
@@ -195,7 +353,13 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
 
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4 max-w-2xl">
-          {messages.length === 0 && !isLoading && (
+          {historyLoading && (
+            <p className="text-muted-foreground text-sm flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              Loading conversation…
+            </p>
+          )}
+          {!historyLoading && messages.length === 0 && !isLoading && (
             <p className="text-muted-foreground text-sm">
               Say hello and tell the AI what kind of work you do or what you’re
               proud of. It’ll ask follow-ups and capture your experience.
@@ -223,6 +387,7 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
               Thinking…
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
@@ -239,7 +404,7 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message…"
+          placeholder="e.g. I'm a software engineer at Acme, or tell me what you're proud of…"
           disabled={isLoading}
           className="flex-1"
         />
@@ -251,6 +416,7 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
           )}
         </Button>
       </form>
+      </div>
     </div>
   );
 }

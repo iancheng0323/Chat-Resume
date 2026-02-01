@@ -59,8 +59,100 @@ export default function ProfileEditor({
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const hasCaptured =
+    (initialProfile && (initialProfile.bio || initialProfile.current_job_role || initialProfile.career_summary || (initialProfile.skills?.length ?? 0) > 0)) ||
+    initialWork.length > 0 ||
+    initialProjects.length > 0;
+
   return (
     <div className="space-y-8">
+      {hasCaptured && (
+        <Card className="bg-muted/30 border-dashed">
+          <CardHeader>
+            <CardTitle className="text-base">Captured from chat</CardTitle>
+            <CardDescription>
+              What the AI has saved from your conversations. You can edit details in the sections below.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {initialProfile && (initialProfile.bio || initialProfile.current_job_role || initialProfile.career_summary) && (
+              <section>
+                <h3 className="text-sm font-semibold text-foreground mb-2">About</h3>
+                {initialProfile.current_job_role && (
+                  <p className="text-sm mb-1">
+                    <strong>Current role:</strong> {initialProfile.current_job_role}
+                  </p>
+                )}
+                {initialProfile.bio && <p className="text-sm mb-1">{initialProfile.bio}</p>}
+                {initialProfile.career_summary && (
+                  <p className="text-sm text-muted-foreground">{initialProfile.career_summary}</p>
+                )}
+              </section>
+            )}
+            {initialProfile && (initialProfile.skills?.length ?? 0) > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Skills</h3>
+                <p className="text-sm text-muted-foreground">
+                  {(initialProfile.skills ?? []).join(", ")}
+                </p>
+              </section>
+            )}
+            {initialWork.length > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Work experience</h3>
+                <div className="space-y-4">
+                  {initialWork.map((w) => (
+                    <div key={w.id} className="text-sm rounded-md border bg-background/50 p-3">
+                      <p className="font-medium text-foreground">
+                        {w.role} at {w.company}
+                      </p>
+                      {(w.start_date || w.end_date) && (
+                        <p className="text-muted-foreground text-xs mt-1">
+                          {w.start_date ?? "?"} – {w.end_date ?? "Present"}
+                        </p>
+                      )}
+                      {w.responsibilities?.length > 0 && (
+                        <ul className="list-disc pl-4 mt-2">
+                          {w.responsibilities.map((r, i) => (
+                            <li key={i} className="text-muted-foreground">{r}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {w.achievements?.length > 0 && (
+                        <ul className="list-disc pl-4 mt-1">
+                          {w.achievements.map((a, i) => (
+                            <li key={i} className="text-muted-foreground">{a}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+            {initialProjects.length > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Projects</h3>
+                <div className="space-y-3">
+                  {initialProjects.map((p) => (
+                    <div key={p.id} className="text-sm">
+                      <p className="font-medium text-foreground">{p.title}</p>
+                      {p.description && (
+                        <p className="text-muted-foreground text-sm">{p.description}</p>
+                      )}
+                      {p.impact && <p className="text-sm">{p.impact}</p>}
+                      {p.technologies?.length > 0 && (
+                        <p className="text-xs text-muted-foreground">{p.technologies.join(", ")}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Profile</CardTitle>

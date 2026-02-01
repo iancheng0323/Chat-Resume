@@ -6,6 +6,7 @@ import type {
 } from "@/types";
 
 const RESUME_JSON_REGEX = /```resume-json\s*([\s\S]*?)```/;
+const PLAIN_JSON_REGEX = /```json\s*([\s\S]*?)```/;
 
 function parseJson<T>(raw: string): T | null {
   try {
@@ -15,24 +16,12 @@ function parseJson<T>(raw: string): T | null {
   }
 }
 
-/**
- * Extract a single resume-json block from assistant text.
- * Returns null if none found or JSON is invalid.
- */
-export function extractResumeJsonFromText(text: string): ExtractedData | null {
-  const match = text.match(RESUME_JSON_REGEX);
-  if (!match) return null;
-
-  const json = parseJson<Record<string, unknown>>(match[1]);
-  if (!json || typeof json !== "object") return null;
-
+function classifyJsonToExtracted(json: Record<string, unknown>): ExtractedData | null {
   if ("company" in json && "role" in json) {
-    const data = json as unknown as ExtractedWorkExperience;
-    return { type: "work_experience", data };
+    return { type: "work_experience", data: json as unknown as ExtractedWorkExperience };
   }
   if ("title" in json && typeof (json as { title: string }).title === "string") {
-    const data = json as unknown as ExtractedProject;
-    return { type: "project", data };
+    return { type: "project", data: json as unknown as ExtractedProject };
   }
   if (
     "bio" in json ||
@@ -40,24 +29,46 @@ export function extractResumeJsonFromText(text: string): ExtractedData | null {
     "career_summary" in json ||
     "skills" in json
   ) {
-    const data = json as unknown as ExtractedProfile;
-    return { type: "profile", data };
+    return { type: "profile", data: json as unknown as ExtractedProfile };
   }
-
   return null;
 }
 
 /**
- * Extract all resume-json blocks from assistant text (e.g. multiple jobs in one message).
+ * Extract a single resume-json block from assistant text.
+ * Returns null if none found or JSON is invalid.
+ */
+export function extractResumeJsonFromText(text: string): ExtractedData | null {
+  const match = text.match(RESUME_JSON_REGEX);
+  if (!match) return null;
+  const json = parseJson<Record<string, unknown>>(match[1]);
+  if (!json || typeof json !== "object") return null;
+  return classifyJsonToExtracted(json);
+}
+
+/**
+ * Extract all resume-json (and fallback ```json) blocks from assistant text.
+ * Populates live notes from whatever structured blocks the model outputs.
  */
 export function extractAllResumeJsonFromText(text: string): ExtractedData[] {
   const results: ExtractedData[] = [];
-  let remaining = text;
-  let match: RegExpExecArray | null;
-  const regex = new RegExp(RESUME_JSON_REGEX.source, "g");
-  while ((match = regex.exec(remaining)) !== null) {
-    const parsed = extractResumeJsonFromText(match[0]);
-    if (parsed) results.push(parsed);
+  const seen = new Set<string>();
+
+  function add(extracted: ExtractedData | null) {
+    if (!extracted) return;
+    const key = JSON.stringify(extracted);
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(extracted);
+  }
+
+  for (const regex of [RESUME_JSON_REGEX, PLAIN_JSON_REGEX]) {
+    let match: RegExpExecArray | null;
+    const re = new RegExp(regex.source, "g");
+    while ((match = re.exec(text)) !== null) {
+      const json = parseJson<Record<string, unknown>>(match[1]);
+      if (json && typeof json === "object") add(classifyJsonToExtracted(json));
+    }
   }
   return results;
 }

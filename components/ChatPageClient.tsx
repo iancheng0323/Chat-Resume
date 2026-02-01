@@ -12,7 +12,11 @@ export default function ChatPageClient({ userId }: ChatPageClientProps) {
   const [notesRefetchTrigger, setNotesRefetchTrigger] = useState(0);
 
   const handleChatFinish = useCallback(() => {
+    // Refetch now (in case server was fast) and again after 2s so we catch the server's onFinish DB write
     setNotesRefetchTrigger((t) => t + 1);
+    setTimeout(() => {
+      setNotesRefetchTrigger((t) => t + 1);
+    }, 2000);
   }, []);
 
   return (
