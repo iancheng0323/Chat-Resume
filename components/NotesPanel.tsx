@@ -7,9 +7,11 @@ import type { Profile, WorkExperience, Project } from "@/types";
 
 interface NotesPanelProps {
   userId: string;
+  /** When this value changes, notes are refetched (e.g. after chat stream finishes). */
+  refetchTrigger?: number;
 }
 
-export default function NotesPanel({ userId }: NotesPanelProps) {
+export default function NotesPanel({ userId, refetchTrigger }: NotesPanelProps) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [work, setWork] = useState<WorkExperience[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -31,6 +33,11 @@ export default function NotesPanel({ userId }: NotesPanelProps) {
   useEffect(() => {
     fetchData();
   }, [userId]);
+
+  // Refetch when parent signals (e.g. chat stream finished and wrote to DB)
+  useEffect(() => {
+    if (refetchTrigger != null && refetchTrigger > 0) fetchData();
+  }, [refetchTrigger]);
 
   useEffect(() => {
     const supabase = createClient();

@@ -1,12 +1,17 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { APICallError, generateText } from "ai";
+import { isMockMode } from "@/lib/llm-mode";
 
 /**
  * GET /api/chat/check
  * Validates ANTHROPIC_API_KEY with a minimal request. Returns 200 with { ok, error? }.
- * Call from the client to show a clear message when the key returns 403.
+ * When LLM_MODE=mock, returns { ok: true } without calling Anthropic.
  */
 export async function GET() {
+  if (isMockMode()) {
+    return Response.json({ ok: true }, { status: 200 });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     return Response.json(

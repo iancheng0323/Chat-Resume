@@ -1,10 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
+import { isMockMode } from "@/lib/llm-mode";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+
+/** Deterministic mock summary when LLM_MODE=mock. */
+const MOCK_SESSION_SUMMARY =
+  "Session wrapped up (mock mode). We captured what you shared. Come back anytime to add more.";
 
 /**
  * POST: End the current session and generate a summary (what was captured, what's missing).
  * Body: { sessionId: string }
+ * When LLM_MODE=mock, returns a fixed summary without calling Anthropic.
  */
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -37,17 +43,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const { data: messages } = await supabase
-    .from("conversations")
-    .select("role, content")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: true });
-
-  const conversationText =
-    messages
-      ?.map((m) => `${m.role}: ${m.content}`)
-      .join("\n\n") ?? "";
-
   // Fetch current profile state to list what's "missing"
   const [profileRes, workRes, projectsRes] = await Promise.all([
     supabase.from("profiles").select("bio, current_job_role, career_summary, skills").eq("user_id", user.id).single(),
@@ -63,29 +58,42 @@ export async function POST(req: Request) {
   if (!hasWork) missing.push("work experience");
   if (!hasProjects) missing.push("projects");
 
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const systemPrompt = `You are helping wrap up a resume-building chat session. Based on the conversation, write a short, friendly session summary (2-4 sentences) that:
+  let summary = MOCK_SESSION_SUMMARY;
+  if (!isMockMode()) {
+    const { data: messages } = await supabase
+      .from("conversations")
+      .select("role, content")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+
+    const conversationText =
+      messages
+        ?.map((m) => `${m.role}: ${m.content}`)
+        .join("\n\n") ?? "";
+
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const systemPrompt = `You are helping wrap up a resume-building chat session. Based on the conversation, write a short, friendly session summary (2-4 sentences) that:
 1. Summarizes what was captured in this session (e.g. jobs, projects, skills mentioned).
 2. Gently notes what's still missing if anything (e.g. "We didn't get to projects yet" or "Your profile summary is still light").
 3. Encourages the user to come back and continue when they're ready.
 
 Keep the tone warm and concise. Output only the summary text, no JSON.`;
-  const userPrompt = `Conversation:\n${conversationText}\n\nCurrent gaps: ${missing.length ? missing.join("; ") : "None"}.\n\nWrite the session summary:`;
+    const userPrompt = `Conversation:\n${conversationText}\n\nCurrent gaps: ${missing.length ? missing.join("; ") : "None"}.\n\nWrite the session summary:`;
 
-  const modelId =
-    process.env.ANTHROPIC_CHAT_MODEL?.trim() || "claude-3-5-sonnet-20241022";
-  let summary = "You wrapped up this session. Come back anytime to add more.";
-  try {
-    const resp = await anthropic.messages.create({
-      model: modelId,
-      max_tokens: 500,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-    });
-    const textBlock = resp.content.find((c) => c.type === "text");
-    if (textBlock && "text" in textBlock) summary = textBlock.text;
-  } catch (e) {
-    console.error("Summary generation error:", e);
+    const modelId =
+      process.env.ANTHROPIC_CHAT_MODEL?.trim() || "claude-3-5-sonnet-20241022";
+    try {
+      const resp = await anthropic.messages.create({
+        model: modelId,
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      });
+      const textBlock = resp.content.find((c) => c.type === "text");
+      if (textBlock && "text" in textBlock) summary = textBlock.text;
+    } catch (e) {
+      console.error("Summary generation error:", e);
+    }
   }
 
   const { error: updateErr } = await supabase

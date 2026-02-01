@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils";
 
 interface ChatInterfaceProps {
   userId: string;
+  /** Called when an AI response stream finishes (so live notes can refetch). */
+  onChatFinish?: () => void;
 }
 
-export default function ChatInterface({ userId }: ChatInterfaceProps) {
+export default function ChatInterface({ userId, onChatFinish }: ChatInterfaceProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [lifeStoryMode, setLifeStoryMode] = useState(false);
   const [endSummary, setEndSummary] = useState<string | null>(null);
@@ -104,6 +106,17 @@ export default function ChatInterface({ userId }: ChatInterfaceProps) {
       cancelled = true;
     };
   }, [sessionId, setMessages]);
+
+  // Notify parent when AI stream finishes so live notes can refetch
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    const wasLoading =
+      prevStatusRef.current === "streaming" || prevStatusRef.current === "submitted";
+    if (wasLoading && status === "ready" && onChatFinish) {
+      onChatFinish();
+    }
+    prevStatusRef.current = status;
+  }, [status, onChatFinish]);
 
   const [input, setInput] = useState("");
   const handleSubmit = useCallback(
