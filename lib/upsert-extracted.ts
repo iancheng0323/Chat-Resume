@@ -23,7 +23,16 @@ export async function upsertExtracted(
     if (bio !== undefined) payload.bio = bio;
     if (current_job_role !== undefined) payload.current_job_role = current_job_role;
     if (career_summary !== undefined) payload.career_summary = career_summary;
-    if (skills !== undefined) payload.skills = skills;
+    if (skills !== undefined && skills.length > 0) {
+      const { data: existing } = await supabase
+        .from("profiles")
+        .select("skills")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const existingSkills = (existing?.skills ?? []) as string[];
+      const merged = [...new Set([...existingSkills, ...skills])];
+      payload.skills = merged;
+    }
     await supabase.from("profiles").upsert(payload, {
       onConflict: "user_id",
     });

@@ -4,8 +4,14 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
 /** Deterministic mock summary when LLM_MODE=mock. */
-const MOCK_SESSION_SUMMARY =
-  "Session wrapped up (mock mode). We captured what you shared. Come back anytime to add more.";
+const MOCK_SESSION_SUMMARY = `Session summary
+- Session wrapped up (mock mode). We captured what you shared.
+
+What's still missing
+- Set LLM_MODE=remote to get a detailed summary.
+
+Next time we could chat about
+- Come back anytime to add more to your story.`;
 
 /**
  * POST: End the current session and generate a summary (what was captured, what's missing).
@@ -72,20 +78,33 @@ export async function POST(req: Request) {
         .join("\n\n") ?? "";
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const systemPrompt = `You are helping wrap up a resume-building chat session. Based on the conversation, write a short, friendly session summary (2-4 sentences) that:
-1. Summarizes what was captured in this session (e.g. jobs, projects, skills mentioned).
-2. Gently notes what's still missing if anything (e.g. "We didn't get to projects yet" or "Your profile summary is still light").
-3. Encourages the user to come back and continue when they're ready.
+    const systemPrompt = `You are wrapping up a resume-building / autobiography interview session. Based on the conversation, write a detailed session wrap-up in plain text using this exact structure. Use bullet points (lines starting with "- ") for all lists. No JSON or markdown code blocks.
 
-Keep the tone warm and concise. Output only the summary text, no JSON.`;
-    const userPrompt = `Conversation:\n${conversationText}\n\nCurrent gaps: ${missing.length ? missing.join("; ") : "None"}.\n\nWrite the session summary:`;
+Structure your response exactly like this:
+
+Session summary
+- [Bullet 1: what was captured in this session — be specific: jobs, roles, companies, projects, skills, dates, or themes discussed]
+- [Bullet 2: another concrete thing captured]
+- [Add as many bullets as needed to cover the session in detail]
+
+What's still missing
+- [Bullet 1: what we didn't cover or what's still light — e.g. "No projects added yet", "Career summary could be expanded", "Skills list is thin"]
+- [Add more if relevant; if nothing is missing, say "Nothing critical — we covered a lot!"]
+
+Next time we could chat about
+- [Bullet 1: concrete topic or question to pick up next — e.g. "Dive into the Acme project impact", "Add dates for your role at X", "Your career pivot story"]
+- [Bullet 2: another suggestion]
+- [Add 2–4 suggestions so they have clear options for the next session]
+
+Keep the tone warm and helpful. Be specific: reference actual companies, roles, or topics from the conversation where relevant.`;
+    const userPrompt = `Conversation:\n${conversationText}\n\nCurrent profile gaps (for "What's still missing"): ${missing.length ? missing.join("; ") : "None"}.\n\nWrite the detailed session wrap-up using the structure above:`;
 
     const modelId =
       process.env.ANTHROPIC_CHAT_MODEL?.trim() || "claude-3-5-sonnet-20241022";
     try {
       const resp = await anthropic.messages.create({
         model: modelId,
-        max_tokens: 500,
+        max_tokens: 1200,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       });

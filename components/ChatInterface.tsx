@@ -346,7 +346,7 @@ export default function ChatInterface({ userId, onChatFinish }: ChatInterfacePro
       </div>
 
       {endSummary && (
-        <div className="mx-4 mt-2 p-3 rounded-lg bg-muted text-sm">
+        <div className="mx-4 mt-2 p-4 rounded-lg bg-muted text-sm whitespace-pre-wrap">
           {endSummary}
         </div>
       )}
